@@ -1,0 +1,19 @@
+from collections.abc import Callable
+from typing import Any
+
+type CompleteFn = Callable[[str, dict[str, Any] | None], None]
+
+
+class Message:
+    def __init__(
+        self,
+        message_id: str,
+        payload: dict[str, Any],
+        on_complete: CompleteFn,
+    ) -> None:
+        self.id = message_id
+        self.payload = payload
+        self._on_complete = on_complete
+
+    def complete(self, result: dict[str, Any] | None = None) -> None:
+        self._on_complete(self.id, result)

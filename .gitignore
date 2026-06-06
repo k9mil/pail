@@ -28,5 +28,8 @@ htmlcov/
 .idea/
 .DS_Store
 
+# Local-only
+examples/
+
 # LLMs
 .claude

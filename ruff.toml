@@ -22,5 +22,8 @@ ignore = [
     "COM812",
 ]
 
+[lint.per-file-ignores]
+"examples/*" = ["INP001", "S105", "S106"]
+
 [format]
 quote-style = "double"
