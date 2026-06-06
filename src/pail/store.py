@@ -1,14 +1,31 @@
-from typing import Any
+from enum import StrEnum
 
 from botocore.exceptions import ClientError
 
 from pail.protocols import S3Client
+
+LIST_OBJECTS_V2 = "list_objects_v2"
+
+
+class S3Error(StrEnum):
+    PRECONDITION_FAILED = "PreconditionFailed"
+    NO_SUCH_KEY = "NoSuchKey"
+
+
+class S3Field(StrEnum):
+    CONTENTS = "Contents"
+    KEY = "Key"
+    BODY = "Body"
 
 
 class Store:
     def __init__(self, bucket: str, client: S3Client) -> None:
         self.bucket = bucket
         self.client = client
+
+    @staticmethod
+    def error_code(error: ClientError) -> str:
+        return error.response["Error"]["Code"]
 
     def put_if_absent(self, key: str, body: bytes) -> bool:
         try:
@@ -19,7 +36,7 @@ class Store:
                 IfNoneMatch="*",
             )
         except ClientError as error:
-            if error.response["Error"]["Code"] == "PreconditionFailed":
+            if self.error_code(error) == S3Error.PRECONDITION_FAILED:
                 return False
             raise
         return True
@@ -38,10 +55,10 @@ class Store:
                 Key=key,
             )
         except ClientError as error:
-            if error.response["Error"]["Code"] == "NoSuchKey":
+            if self.error_code(error) == S3Error.NO_SUCH_KEY:
                 return None
             raise
-        return response["Body"].read()
+        return response[S3Field.BODY].read()
 
     def delete(self, key: str) -> None:
         self.client.delete_object(
@@ -51,22 +68,9 @@ class Store:
 
     def list_keys(self, prefix: str) -> list[str]:
         keys: list[str] = []
-        token: str | None = None
+        paginator = self.client.get_paginator(LIST_OBJECTS_V2)
 
-        params: dict[str, Any] = {
-            "Bucket": self.bucket,
-            "Prefix": prefix,
-        }
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            keys.extend(item[S3Field.KEY] for item in page.get(S3Field.CONTENTS, []))
 
-        while True:
-            if token is not None:
-                params["ContinuationToken"] = token
-
-            response = self.client.list_objects_v2(**params)
-            keys.extend(item["Key"] for item in response.get("Contents", []))
-
-            if not response.get("IsTruncated"):
-                break
-
-            token = response.get("NextContinuationToken")
         return keys

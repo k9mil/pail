@@ -1,5 +1,12 @@
 # ruff: noqa: N803
+from collections.abc import Iterator
 from typing import Any, Protocol
+
+
+class S3Paginator(Protocol):
+    def paginate(
+        self, *, Bucket: str, Prefix: str = ...
+    ) -> Iterator[dict[str, Any]]: ...
 
 
 class S3Client(Protocol):
@@ -11,6 +18,4 @@ class S3Client(Protocol):
 
     def delete_object(self, *, Bucket: str, Key: str) -> dict[str, Any]: ...
 
-    def list_objects_v2(
-        self, *, Bucket: str, Prefix: str = ..., ContinuationToken: str = ...
-    ) -> dict[str, Any]: ...
+    def get_paginator(self, operation_name: str, /) -> S3Paginator: ...
