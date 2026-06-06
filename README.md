@@ -2,7 +2,7 @@
 
 <img src="https://github.com/user-attachments/assets/d54337b3-3a03-4746-9401-66bccfb05d45" alt="pail" width="480">
 
-# pail
+# *pail*
 
 **A brokerless, durable job queue that lives in a single S3 bucket.**
 
