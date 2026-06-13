@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> The pail product is early and evolving. APIs may change between versions.
+> The pail product is _extremely_ early and evolving. APIs may change between versions, and the project is expected to improve significantly in the near future.
 
 ## Overview
 
