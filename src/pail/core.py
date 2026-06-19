@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from enum import StrEnum
 from functools import partial
 from typing import Any, Self, cast
 
@@ -19,6 +20,12 @@ S3 = "s3"
 
 DEFAULT_VISIBILITY_TIMEOUT = 30.0
 HEARTBEAT_DIVISOR = 3
+DIRECTORY_SUFFIX = "--x-s3"
+
+
+class Mode(StrEnum):
+    STANDARD = "standard"
+    EXPRESS = "express"
 
 
 class Pail:
@@ -30,6 +37,7 @@ class Pail:
         visibility_timeout: float = DEFAULT_VISIBILITY_TIMEOUT,
     ) -> None:
         self.store = Store(bucket, client)
+        self.mode = Mode.EXPRESS if bucket.endswith(DIRECTORY_SUFFIX) else Mode.STANDARD
         self.visibility_timeout = visibility_timeout
         self.heartbeat_interval = visibility_timeout / HEARTBEAT_DIVISOR
 

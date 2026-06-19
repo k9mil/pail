@@ -77,6 +77,10 @@ Ids are [ULIDs](https://github.com/ulid/spec), so listings return jobs oldest-fi
 
 Delivery is **at-least-once**: a dead worker's job is retried, never lost, but it can run more than once. A job's `id` is stable across retries, so use it as your idempotency key.
 
+### Standard and express
+
+pail reads its mode from the bucket name: a general-purpose bucket is standard, and an [S3 Express One Zone](https://aws.amazon.com/s3/storage-classes/express-one-zone/) directory bucket, whose name ends in `--x-s3`, is express. The queue logic is the same on both. Use express if you want cheaper requests and single-digit-millisecond latency and can accept single-AZ durability and unordered claims (it returns a pending job, not necessarily the oldest). Otherwise use standard.
+
 ## When to use it
 
 Reach for pail when you want a queue for long-running work plus live status, without the setup. A typical case is a long-running export or report where the frontend needs to show the user when it's done. Doing that the usual way means standing up SQS for the queue, DynamoDB for status, and a status endpoint or event notifications to surface it. pail is one bucket instead.

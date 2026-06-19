@@ -76,3 +76,26 @@ class RaisingS3(FakeS3):
         IfNoneMatch: str | None = None,
     ) -> dict[str, Any]:
         raise make_client_error("AccessDenied")
+
+
+class ShuffledPaginator(FakePaginator):
+    def paginate(self, *, Bucket: str, Prefix: str = "") -> Iterator[dict[str, Any]]:
+        items = sorted(
+            (
+                (key, stored.last_modified)
+                for (bucket, key), stored in self.objects.items()
+                if bucket == Bucket and key.startswith(Prefix)
+            ),
+            reverse=True,
+        )
+        yield {
+            "Contents": [
+                {"Key": key, "LastModified": last_modified}
+                for key, last_modified in items
+            ],
+        }
+
+
+class ShuffledS3(FakeS3):
+    def get_paginator(self, operation_name: str, /) -> FakePaginator:
+        return ShuffledPaginator(self.objects)

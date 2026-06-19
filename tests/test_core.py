@@ -1,9 +1,9 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from fakes import FakeS3
+from fakes import FakeS3, ShuffledS3
 
-from pail import Pail
+from pail import Mode, Pail
 
 
 def test_given_payload_when_enqueue_then_returns_ulid(pail: Pail) -> None:
@@ -80,3 +80,22 @@ def test_given_fresh_run_when_claim_then_not_reclaimed(s3: FakeS3, pail: Pail) -
     s3.seed("bucket", "run/01FRESH", json.dumps({"n": 1}).encode(), datetime.now(UTC))
     assert pail.claim() is None
     assert ("bucket", "run/01FRESH") in s3.objects
+
+
+def test_given_directory_bucket_when_pail_then_mode_is_express() -> None:
+    pail = Pail("jobs--use1-az4--x-s3", FakeS3())
+    assert pail.mode == Mode.EXPRESS
+
+
+def test_given_general_bucket_when_pail_then_mode_is_standard() -> None:
+    pail = Pail("jobs", FakeS3())
+    assert pail.mode == Mode.STANDARD
+
+
+def test_given_unordered_list_when_claim_all_then_every_job_claimed() -> None:
+    pail = Pail("bucket", ShuffledS3())
+    ids = {pail.enqueue({"n": i}) for i in range(3)}
+    claimed = set()
+    while (message := pail.claim()) is not None:
+        claimed.add(message.id)
+    assert claimed == ids
