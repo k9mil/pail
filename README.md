@@ -75,6 +75,8 @@ done/{id}   finished
 
 Ids are [ULIDs](https://github.com/ulid/spec), so listings return jobs oldest-first. State is a plain object, so a frontend can poll `done/{id}` directly through a presigned URL, no status API required. Enable bucket versioning and every transition is retained as a free audit trail.
 
+Delivery is **at-least-once**: a dead worker's job is retried, never lost, but it can run more than once. A job's `id` is stable across retries, so use it as your idempotency key.
+
 ## When to use it
 
 Reach for pail when you want a queue for long-running work plus live status, without the setup. A typical case is a long-running export or report where the frontend needs to show the user when it's done. Doing that the usual way means standing up SQS for the queue, DynamoDB for status, and a status endpoint or event notifications to surface it. pail is one bucket instead.
