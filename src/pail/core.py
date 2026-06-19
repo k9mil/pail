@@ -1,9 +1,12 @@
 import json
+from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Self, cast
 
 import boto3
 from ulid import ULID
 
+from pail.heartbeat import Heartbeat
 from pail.models import Message
 from pail.protocols import S3Client
 from pail.store import Store
@@ -12,12 +15,23 @@ QUEUE_PREFIX = "queue/"
 RUN_PREFIX = "run/"
 DONE_PREFIX = "done/"
 
-S3 = "S3"
+S3 = "s3"
+
+DEFAULT_VISIBILITY_TIMEOUT = 30.0
+HEARTBEAT_DIVISOR = 3
 
 
 class Pail:
-    def __init__(self, bucket: str, client: S3Client) -> None:
+    def __init__(
+        self,
+        bucket: str,
+        client: S3Client,
+        *,
+        visibility_timeout: float = DEFAULT_VISIBILITY_TIMEOUT,
+    ) -> None:
         self.store = Store(bucket, client)
+        self.visibility_timeout = visibility_timeout
+        self.heartbeat_interval = visibility_timeout / HEARTBEAT_DIVISOR
 
     @classmethod
     def connect(
@@ -28,6 +42,7 @@ class Pail:
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
         region: str | None = None,
+        visibility_timeout: float = DEFAULT_VISIBILITY_TIMEOUT,
     ) -> Self:
         client = boto3.client(
             S3,
@@ -39,6 +54,7 @@ class Pail:
         return cls(
             bucket,
             cast("S3Client", client),
+            visibility_timeout=visibility_timeout,
         )
 
     def enqueue(self, payload: dict[str, Any]) -> str:
@@ -51,9 +67,11 @@ class Pail:
         return message_id
 
     def claim(self) -> Message | None:
-        for key in self.store.list_keys(QUEUE_PREFIX):
-            message_id = key.removeprefix(QUEUE_PREFIX)
-            body = self.store.get(key)
+        self.reclaim()
+
+        for obj in self.store.list_objects(QUEUE_PREFIX):
+            message_id = obj.key.removeprefix(QUEUE_PREFIX)
+            body = self.store.get(obj.key)
 
             if body is None:
                 continue
@@ -62,15 +80,38 @@ class Pail:
                 RUN_PREFIX + message_id,
                 body,
             )
-            self.store.delete(key)
+            self.store.delete(obj.key)
 
             if claimed:
+                heartbeat = Heartbeat(
+                    self.store,
+                    RUN_PREFIX + message_id,
+                    body,
+                    self.heartbeat_interval,
+                )
+                heartbeat.start()
                 return Message(
                     message_id,
                     decode(body),
-                    self.complete,
+                    partial(self.complete, heartbeat=heartbeat),
                 )
         return None
+
+    def reclaim(self) -> None:
+        now = datetime.now(UTC)
+
+        for obj in self.store.list_objects(RUN_PREFIX):
+            if (now - obj.last_modified).total_seconds() <= self.visibility_timeout:
+                continue
+
+            message_id = obj.key.removeprefix(RUN_PREFIX)
+            body = self.store.get(obj.key)
+
+            if body is None:
+                continue
+
+            if self.store.put_if_absent(QUEUE_PREFIX + message_id, body):
+                self.store.delete(obj.key)
 
     def result(self, message_id: str) -> dict[str, Any] | None:
         body = self.store.get(DONE_PREFIX + message_id)
@@ -80,7 +121,14 @@ class Pail:
 
         return decode(body)
 
-    def complete(self, message_id: str, result: dict[str, Any] | None) -> None:
+    def complete(
+        self,
+        message_id: str,
+        result: dict[str, Any] | None,
+        *,
+        heartbeat: Heartbeat,
+    ) -> None:
+        heartbeat.stop()
         self.store.put(
             DONE_PREFIX + message_id,
             encode(result or {}),

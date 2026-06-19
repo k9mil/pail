@@ -1,3 +1,8 @@
+import json
+from datetime import UTC, datetime, timedelta
+
+from fakes import FakeS3
+
 from pail import Pail
 
 
@@ -57,3 +62,21 @@ def test_given_completed_without_result_when_result_then_empty_dict(pail: Pail) 
     assert message is not None
     message.complete()
     assert pail.result(message.id) == {}
+
+
+def test_given_orphaned_run_when_claim_then_reclaims_and_returns(
+    s3: FakeS3,
+    pail: Pail,
+) -> None:
+    stale = datetime.now(UTC) - timedelta(seconds=60)
+    s3.seed("bucket", "run/01ORPHAN", json.dumps({"n": 1}).encode(), stale)
+    message = pail.claim()
+    assert message is not None
+    assert message.id == "01ORPHAN"
+    assert message.payload == {"n": 1}
+
+
+def test_given_fresh_run_when_claim_then_not_reclaimed(s3: FakeS3, pail: Pail) -> None:
+    s3.seed("bucket", "run/01FRESH", json.dumps({"n": 1}).encode(), datetime.now(UTC))
+    assert pail.claim() is None
+    assert ("bucket", "run/01FRESH") in s3.objects

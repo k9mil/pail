@@ -34,11 +34,17 @@ def test_given_object_when_delete_then_gone(store: Store) -> None:
     assert store.get("run/a") is None
 
 
-def test_given_keys_under_prefix_when_list_keys_then_sorted(store: Store) -> None:
+def test_given_keys_under_prefix_when_list_objects_then_sorted(store: Store) -> None:
     store.put("queue/b", b"1")
     store.put("queue/a", b"2")
     store.put("run/c", b"3")
-    assert store.list_keys("queue/") == ["queue/a", "queue/b"]
+    assert [obj.key for obj in store.list_objects("queue/")] == ["queue/a", "queue/b"]
+
+
+def test_given_object_when_list_objects_then_timestamp_is_utc(store: Store) -> None:
+    store.put("queue/a", b"1")
+    [obj] = store.list_objects("queue/")
+    assert obj.last_modified.tzinfo is not None
 
 
 def test_given_unexpected_error_when_put_if_absent_then_reraises() -> None:

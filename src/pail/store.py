@@ -1,4 +1,6 @@
+from datetime import datetime
 from enum import StrEnum
+from typing import NamedTuple
 
 from botocore.exceptions import ClientError
 
@@ -16,6 +18,12 @@ class S3Field(StrEnum):
     CONTENTS = "Contents"
     KEY = "Key"
     BODY = "Body"
+    LAST_MODIFIED = "LastModified"
+
+
+class S3Object(NamedTuple):
+    key: str
+    last_modified: datetime
 
 
 class Store:
@@ -66,11 +74,14 @@ class Store:
             Key=key,
         )
 
-    def list_keys(self, prefix: str) -> list[str]:
-        keys: list[str] = []
+    def list_objects(self, prefix: str) -> list[S3Object]:
+        objects: list[S3Object] = []
         paginator = self.client.get_paginator(LIST_OBJECTS_V2)
 
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            keys.extend(item[S3Field.KEY] for item in page.get(S3Field.CONTENTS, []))
+            objects.extend(
+                S3Object(item[S3Field.KEY], item[S3Field.LAST_MODIFIED])
+                for item in page.get(S3Field.CONTENTS, [])
+            )
 
-        return keys
+        return objects

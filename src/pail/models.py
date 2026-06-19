@@ -13,7 +13,7 @@ class Message:
     ) -> None:
         self.id = message_id
         self.payload = payload
-        self._on_complete = on_complete
+        self.on_complete = on_complete
 
     def complete(self, result: dict[str, Any] | None = None) -> None:
-        self._on_complete(self.id, result)
+        self.on_complete(self.id, result)
