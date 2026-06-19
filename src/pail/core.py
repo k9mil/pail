@@ -80,9 +80,9 @@ class Pail:
                 RUN_PREFIX + message_id,
                 body,
             )
-            self.store.delete(obj.key)
 
             if claimed:
+                self.store.delete(obj.key)
                 heartbeat = Heartbeat(
                     self.store,
                     RUN_PREFIX + message_id,
