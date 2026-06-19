@@ -96,6 +96,46 @@ def test_given_unordered_list_when_claim_all_then_every_job_claimed() -> None:
     pail = Pail("bucket", ShuffledS3())
     ids = {pail.enqueue({"n": i}) for i in range(3)}
     claimed = set()
-    while (message := pail.claim()) is not None:
+    message = pail.claim()
+    while message is not None:
         claimed.add(message.id)
+        message = pail.claim()
     assert claimed == ids
+
+
+def test_given_empty_queue_when_stats_then_all_zero(pail: Pail) -> None:
+    assert pail.stats() == (0, 0, 0, None)
+
+
+def test_given_pending_jobs_when_stats_then_counts_pending(pail: Pail) -> None:
+    pail.enqueue({"n": 1})
+    pail.enqueue({"n": 2})
+    stats = pail.stats()
+    assert stats.pending == 2
+    assert stats.running == 0
+    assert stats.done == 0
+
+
+def test_given_claimed_job_when_stats_then_counts_running(pail: Pail) -> None:
+    pail.enqueue({"n": 1})
+    pail.claim()
+    stats = pail.stats()
+    assert stats.pending == 0
+    assert stats.running == 1
+
+
+def test_given_completed_job_when_stats_then_counts_done(pail: Pail) -> None:
+    pail.enqueue({"n": 1})
+    message = pail.claim()
+    assert message is not None
+    message.complete({"ok": True})
+    stats = pail.stats()
+    assert stats.running == 0
+    assert stats.done == 1
+
+
+def test_given_pending_job_when_stats_then_oldest_pending_is_set(pail: Pail) -> None:
+    pail.enqueue({"n": 1})
+    oldest = pail.stats().oldest_pending
+    assert oldest is not None
+    assert oldest >= timedelta(0)

@@ -1,12 +1,12 @@
-import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import partial
-from typing import Any, Self, cast
+from typing import Any, NamedTuple, Self, cast
 
 import boto3
 from ulid import ULID
 
+from pail.codec import decode, encode
 from pail.heartbeat import Heartbeat
 from pail.models import Message
 from pail.protocols import S3Client
@@ -26,6 +26,13 @@ DIRECTORY_SUFFIX = "--x-s3"
 class Mode(StrEnum):
     STANDARD = "standard"
     EXPRESS = "express"
+
+
+class Stats(NamedTuple):
+    pending: int
+    running: int
+    done: int
+    oldest_pending: timedelta | None
 
 
 class Pail:
@@ -129,6 +136,20 @@ class Pail:
 
         return decode(body)
 
+    def stats(self) -> Stats:
+        queue = self.store.list_objects(QUEUE_PREFIX)
+        oldest = min(
+            (obj.last_modified for obj in queue),
+            default=None,
+        )
+
+        return Stats(
+            pending=len(queue),
+            running=len(self.store.list_objects(RUN_PREFIX)),
+            done=len(self.store.list_objects(DONE_PREFIX)),
+            oldest_pending=datetime.now(UTC) - oldest if oldest is not None else None,
+        )
+
     def complete(
         self,
         message_id: str,
@@ -142,11 +163,3 @@ class Pail:
             encode(result or {}),
         )
         self.store.delete(RUN_PREFIX + message_id)
-
-
-def encode(value: dict[str, Any]) -> bytes:
-    return json.dumps(value).encode()
-
-
-def decode(body: bytes) -> dict[str, Any]:
-    return json.loads(body)
