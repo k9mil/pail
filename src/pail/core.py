@@ -1,3 +1,5 @@
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import partial
@@ -18,9 +20,13 @@ DONE_PREFIX = "done/"
 
 S3 = "s3"
 
+DEFAULT_POLL_INTERVAL = 5.0
 DEFAULT_VISIBILITY_TIMEOUT = 30.0
 HEARTBEAT_DIVISOR = 3
 DIRECTORY_SUFFIX = "--x-s3"
+
+
+type Handler = Callable[[dict[str, Any]], dict[str, Any] | None]
 
 
 class Mode(StrEnum):
@@ -109,6 +115,7 @@ class Pail:
                     message_id,
                     decode(body),
                     partial(self.complete, heartbeat=heartbeat),
+                    partial(self.fail, heartbeat=heartbeat),
                 )
         return None
 
@@ -163,3 +170,36 @@ class Pail:
             encode(result or {}),
         )
         self.store.delete(RUN_PREFIX + message_id)
+
+    def fail(self, message_id: str, *, heartbeat: Heartbeat) -> None:
+        heartbeat.stop()
+        body = self.store.get(RUN_PREFIX + message_id)
+
+        if body is None:
+            return
+
+        if self.store.put_if_absent(QUEUE_PREFIX + message_id, body):
+            self.store.delete(RUN_PREFIX + message_id)
+
+    def work_once(self, handler: Handler) -> bool:
+        message = self.claim()
+
+        if message is None:
+            return False
+
+        try:
+            message.complete(handler(message.payload))
+        except Exception:
+            message.fail()
+
+        return True
+
+    def work(
+        self,
+        handler: Handler,
+        *,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
+    ) -> None:
+        while True:
+            if not self.work_once(handler):
+                time.sleep(poll_interval)

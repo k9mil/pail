@@ -43,23 +43,28 @@ The producer enqueues and gets an id back:
 job_id = pail.enqueue({"scenario": "market_crash", "agents": 10_000})
 ```
 
-A worker claims a job, runs its own compute, and completes it:
+A worker is just a function. Hand it to pail and it runs the loop for you, including failure handling: a job that raises is returned to the queue instead of lost.
 
 ```python
-while True:
-    msg = pail.claim()
-    if msg is None:
-        time.sleep(2)
-        continue
-    result = run(msg.payload)
-    msg.complete(result)
+def run(payload):
+    return {"price": simulate(payload["agents"])}
+
+pail.work(run)
 ```
 
-Anyone can poll the result by id:
+Running on ephemeral compute like a Fargate task or a cron container? Process one job and exit:
+
+```python
+pail.work_once(run)
+```
+
+The id from `enqueue` is the handle. Whoever holds it, the producer or a frontend you passed it to, polls the result straight from the bucket while the worker stays oblivious to it. It returns `None` until the job is done, then the worker's return value:
 
 ```python
 pail.result(job_id)
 ```
+
+That is the whole API: `enqueue`, `work`, `result`. No broker to run, no status table to provision, no endpoint to wire up. If you want the raw primitives, `claim` / `complete` / `fail` are there too.
 
 ## How it works
 

@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fakes import FakeS3, ShuffledS3
 
@@ -139,3 +140,26 @@ def test_given_pending_job_when_stats_then_oldest_pending_is_set(pail: Pail) -> 
     oldest = pail.stats().oldest_pending
     assert oldest is not None
     assert oldest >= timedelta(0)
+
+
+def test_given_empty_queue_when_work_once_then_returns_false(pail: Pail) -> None:
+    assert pail.work_once(lambda payload: payload) is False
+
+
+def test_given_job_when_work_once_then_completes_with_result(pail: Pail) -> None:
+    job_id = pail.enqueue({"n": 2})
+    did_work = pail.work_once(lambda payload: {"doubled": payload["n"] * 2})
+    assert did_work is True
+    assert pail.result(job_id) == {"doubled": 4}
+
+
+def test_given_raising_handler_when_work_once_then_requeues(pail: Pail) -> None:
+    pail.enqueue({"n": 1})
+
+    def boom(payload: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError
+
+    assert pail.work_once(boom) is True
+    stats = pail.stats()
+    assert stats.pending == 1
+    assert stats.running == 0
