@@ -43,7 +43,7 @@ The producer enqueues and gets an id back:
 job_id = pail.enqueue({"scenario": "market_crash", "agents": 10_000})
 ```
 
-A worker is just a function. Hand it to pail and it runs the loop for you, including failure handling: a job that raises is returned to the queue instead of lost.
+A worker is just a function. Hand it to pail and it runs the loop for you, including retries and a dead-letter queue: a job that raises is returned to the queue, retried, and parked in the DLQ if it never succeeds, never silently lost.
 
 ```python
 def run(payload):
@@ -74,13 +74,14 @@ A job is one JSON object whose prefix is its state:
 
 ```
 queue/{id}  pending
-run/{id}    in flight
+run/{id}    in-flight
 done/{id}   finished
+dlq/{id}    dlq
 ```
 
 Ids are [ULIDs](https://github.com/ulid/spec), so listings return jobs oldest-first. State is a plain object, so a frontend can poll `done/{id}` directly through a presigned URL, no status API required. Enable bucket versioning and every transition is retained as a free audit trail.
 
-Delivery is **at-least-once**: a dead worker's job is retried, never lost, but it can run more than once. A job's `id` is stable across retries, so use it as your idempotency key.
+Delivery is **at-least-once**: a dead worker's job is retried, never lost, but it can run more than once. A job's `id` is stable across retries, so use it as your idempotency key. A job that keeps failing is retried up to `max_retries` times (default 3) and then parked in `dlq/` for inspection instead of looping forever, set `max_retries=None` to retry without a ceiling.
 
 ### Standard and express
 
