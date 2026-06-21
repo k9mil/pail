@@ -1,10 +1,18 @@
-import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fakes import FakeS3, ShuffledS3
 
 from pail import Mode, Pail
+from pail.codec import unwrap, wrap
+
+QUEUE_PREFIX = "queue/"
+RUN_PREFIX = "run/"
+DLQ_PREFIX = "dlq/"
+
+
+def boom(payload: dict[str, Any]) -> dict[str, Any]:
+    raise RuntimeError
 
 
 def test_given_payload_when_enqueue_then_returns_ulid(pail: Pail) -> None:
@@ -70,7 +78,7 @@ def test_given_orphaned_run_when_claim_then_reclaims_and_returns(
     pail: Pail,
 ) -> None:
     stale = datetime.now(UTC) - timedelta(seconds=60)
-    s3.seed("bucket", "run/01ORPHAN", json.dumps({"n": 1}).encode(), stale)
+    s3.seed("bucket", "run/01ORPHAN", wrap({"n": 1}), stale)
     message = pail.claim()
     assert message is not None
     assert message.id == "01ORPHAN"
@@ -78,7 +86,7 @@ def test_given_orphaned_run_when_claim_then_reclaims_and_returns(
 
 
 def test_given_fresh_run_when_claim_then_not_reclaimed(s3: FakeS3, pail: Pail) -> None:
-    s3.seed("bucket", "run/01FRESH", json.dumps({"n": 1}).encode(), datetime.now(UTC))
+    s3.seed("bucket", "run/01FRESH", wrap({"n": 1}), datetime.now(UTC))
     assert pail.claim() is None
     assert ("bucket", "run/01FRESH") in s3.objects
 
@@ -105,7 +113,7 @@ def test_given_unordered_list_when_claim_all_then_every_job_claimed() -> None:
 
 
 def test_given_empty_queue_when_stats_then_all_zero(pail: Pail) -> None:
-    assert pail.stats() == (0, 0, 0, None)
+    assert pail.stats() == (0, 0, 0, 0, None)
 
 
 def test_given_pending_jobs_when_stats_then_counts_pending(pail: Pail) -> None:
@@ -155,11 +163,50 @@ def test_given_job_when_work_once_then_completes_with_result(pail: Pail) -> None
 
 def test_given_raising_handler_when_work_once_then_requeues(pail: Pail) -> None:
     pail.enqueue({"n": 1})
-
-    def boom(payload: dict[str, Any]) -> dict[str, Any]:
-        raise RuntimeError
-
     assert pail.work_once(boom) is True
     stats = pail.stats()
     assert stats.pending == 1
     assert stats.running == 0
+
+
+def test_given_failing_job_under_cap_when_work_once_then_attempts_incremented(
+    s3: FakeS3,
+    pail: Pail,
+) -> None:
+    job_id = pail.enqueue({"n": 1})
+    pail.work_once(boom)
+    body = s3.objects[("bucket", QUEUE_PREFIX + job_id)].body
+    assert unwrap(body).attempts == 1
+
+
+def test_given_failing_job_over_cap_when_work_once_then_lands_in_dlq(
+    s3: FakeS3,
+) -> None:
+    pail = Pail("bucket", s3, max_retries=1)
+    job_id = pail.enqueue({"n": 1})
+    pail.work_once(boom)  # attempt 1 -> requeued
+    pail.work_once(boom)  # attempt 2 -> exhausted
+    stats = pail.stats()
+    assert stats.pending == 0
+    assert stats.failed == 1
+    body = s3.objects[("bucket", DLQ_PREFIX + job_id)].body
+    assert unwrap(body) == ({"n": 1}, 2)
+
+
+def test_given_orphan_over_cap_when_claim_then_reclaim_dlqs_it(s3: FakeS3) -> None:
+    pail = Pail("bucket", s3, max_retries=1)
+    stale = datetime.now(UTC) - timedelta(seconds=60)
+    s3.seed("bucket", RUN_PREFIX + "01DEAD", wrap({"n": 1}, attempts=1), stale)
+    assert pail.claim() is None
+    assert pail.stats().failed == 1
+    assert ("bucket", RUN_PREFIX + "01DEAD") not in s3.objects
+
+
+def test_given_no_cap_when_repeatedly_fails_then_never_dlqs(s3: FakeS3) -> None:
+    pail = Pail("bucket", s3, max_retries=None)
+    pail.enqueue({"n": 1})
+    for _ in range(5):
+        pail.work_once(boom)
+    stats = pail.stats()
+    assert stats.pending == 1
+    assert stats.failed == 0
