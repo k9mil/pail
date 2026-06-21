@@ -22,7 +22,7 @@ You enqueue work, your own workers claim and process it, and anyone can read a j
 ## Install
 
 ```bash
-uv add pail
+uv add pailq
 ```
 
 Then point it at a bucket:
