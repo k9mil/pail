@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://github.com/user-attachments/assets/650bf5ff-d4d3-4e88-9c38-2d70d35038f3" alt="pail" width="480">
+<img src="https://github.com/user-attachments/assets/650bf5ff-d4d3-4e88-9c38-2d70d35038f3" alt="pail" width="720">
 
 # *pail*
 
