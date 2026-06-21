@@ -68,7 +68,7 @@ That is the whole API: `enqueue`, `work`, `result`. No broker to run, no status 
 
 ### More examples
 
-Runnable versions of these patterns (a producer, a long-running worker, a one-shot worker, the raw primitives, retries and the DLQ) live in [`examples/`](examples).
+Runnable versions of these patterns (a producer, a long-running worker, a one-shot worker, the raw primitives, retries and the DLQ) live in [`examples/`](https://github.com/k9mil/pail/tree/master/examples).
 
 ## How it works
 
