@@ -66,6 +66,10 @@ pail.result(job_id)
 
 That is the whole API: `enqueue`, `work`, `result`. No broker to run, no status table to provision, no endpoint to wire up. If you want the raw primitives, `claim` / `complete` / `fail` are there too.
 
+### More examples
+
+Runnable versions of these patterns (a producer, a long-running worker, a one-shot worker, the raw primitives, retries and the DLQ) live in [`examples/`](examples).
+
 ## How it works
 
 Everything rests on one S3 feature: conditional writes. `IfNoneMatch="*"` turns a `PutObject` into a compare-and-swap, so exactly one of N racing workers wins a job. No locks, no coordinator, no leader election.
