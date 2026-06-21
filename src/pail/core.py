@@ -8,7 +8,7 @@ from typing import Any, NamedTuple, Self, cast
 import boto3
 from ulid import ULID
 
-from pail.codec import decode, encode
+from pail.codec import decode, encode, unwrap, wrap
 from pail.heartbeat import Heartbeat
 from pail.models import Message
 from pail.protocols import S3Client
@@ -17,11 +17,13 @@ from pail.store import Store
 QUEUE_PREFIX = "queue/"
 RUN_PREFIX = "run/"
 DONE_PREFIX = "done/"
+DLQ_PREFIX = "dlq/"
 
 S3 = "s3"
 
-DEFAULT_POLL_INTERVAL = 5.0
+DEFAULT_POLL_INTERVAL = 20.0
 DEFAULT_VISIBILITY_TIMEOUT = 30.0
+DEFAULT_MAX_RETRIES = 3
 HEARTBEAT_DIVISOR = 3
 DIRECTORY_SUFFIX = "--x-s3"
 
@@ -38,6 +40,7 @@ class Stats(NamedTuple):
     pending: int
     running: int
     done: int
+    failed: int
     oldest_pending: timedelta | None
 
 
@@ -48,11 +51,13 @@ class Pail:
         client: S3Client,
         *,
         visibility_timeout: float = DEFAULT_VISIBILITY_TIMEOUT,
+        max_retries: int | None = DEFAULT_MAX_RETRIES,
     ) -> None:
         self.store = Store(bucket, client)
         self.mode = Mode.EXPRESS if bucket.endswith(DIRECTORY_SUFFIX) else Mode.STANDARD
         self.visibility_timeout = visibility_timeout
         self.heartbeat_interval = visibility_timeout / HEARTBEAT_DIVISOR
+        self.max_retries = max_retries
 
     @classmethod
     def connect(
@@ -64,6 +69,7 @@ class Pail:
         secret_access_key: str | None = None,
         region: str | None = None,
         visibility_timeout: float = DEFAULT_VISIBILITY_TIMEOUT,
+        max_retries: int | None = DEFAULT_MAX_RETRIES,
     ) -> Self:
         client = boto3.client(
             S3,
@@ -76,13 +82,14 @@ class Pail:
             bucket,
             cast("S3Client", client),
             visibility_timeout=visibility_timeout,
+            max_retries=max_retries,
         )
 
     def enqueue(self, payload: dict[str, Any]) -> str:
         message_id = str(ULID())
         self.store.put_if_absent(
             QUEUE_PREFIX + message_id,
-            encode(payload),
+            wrap(payload),
         )
 
         return message_id
@@ -113,7 +120,7 @@ class Pail:
                 heartbeat.start()
                 return Message(
                     message_id,
-                    decode(body),
+                    unwrap(body).payload,
                     partial(self.complete, heartbeat=heartbeat),
                     partial(self.fail, heartbeat=heartbeat),
                 )
@@ -132,8 +139,19 @@ class Pail:
             if body is None:
                 continue
 
-            if self.store.put_if_absent(QUEUE_PREFIX + message_id, body):
-                self.store.delete(obj.key)
+            self.redeliver(message_id, body)
+
+    def redeliver(self, message_id: str, body: bytes) -> None:
+        envelope = unwrap(body)
+        attempts = envelope.attempts + 1
+        exhausted = self.max_retries is not None and attempts > self.max_retries
+        destination = DLQ_PREFIX if exhausted else QUEUE_PREFIX
+
+        if self.store.put_if_absent(
+            destination + message_id,
+            wrap(envelope.payload, attempts),
+        ):
+            self.store.delete(RUN_PREFIX + message_id)
 
     def result(self, message_id: str) -> dict[str, Any] | None:
         body = self.store.get(DONE_PREFIX + message_id)
@@ -154,6 +172,7 @@ class Pail:
             pending=len(queue),
             running=len(self.store.list_objects(RUN_PREFIX)),
             done=len(self.store.list_objects(DONE_PREFIX)),
+            failed=len(self.store.list_objects(DLQ_PREFIX)),
             oldest_pending=datetime.now(UTC) - oldest if oldest is not None else None,
         )
 
@@ -178,8 +197,7 @@ class Pail:
         if body is None:
             return
 
-        if self.store.put_if_absent(QUEUE_PREFIX + message_id, body):
-            self.store.delete(RUN_PREFIX + message_id)
+        self.redeliver(message_id, body)
 
     def work_once(self, handler: Handler) -> bool:
         message = self.claim()
