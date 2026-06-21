@@ -1,0 +1,29 @@
+name: CI (test, lint, types)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Lint (ruff)
+        run: uvx ruff check
+
+      - name: Types (ty)
+        run: uvx ty check
